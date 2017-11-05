@@ -3,18 +3,18 @@
 ## Source: https://github.com/hexojs/hexo/
 
 # Site
-title: Hexo
+title: 张冲的博客
 subtitle:
 description:
-author: John Doe
-language:
+author: 张冲
+language: zh-Hans
 timezone:
 
 # URL
 ## If your site is put in a subdirectory, set url as 'http://yoursite.com/child' and root as '/child/'
-url: http://yoursite.com
+url: https://always-less.github.io/
 root: /
-permalink: :year/:month/:day/:title/
+permalink: :year-:month-:day-:title
 permalink_defaults:
 
 # Directory
