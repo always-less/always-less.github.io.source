@@ -52,7 +52,7 @@ public List<String> getRuleNamesByStream(List<Rule> rules) {
 
 如果你觉得也没看出stream api有多大优势，那么下面这两个例子肯定会改变你的想法。
 
-需求二：对于给定的规则列表，跳过前10个，然后在剩下的规则中返回优先级大于50的前100个规则的名字列表。
+需求二：对于给定的规则列表，跳过前10个（不要问为什么），然后在剩下的规则中返回优先级大于50的前100个规则的名字列表。
 在Java8之前实现如下，
 ```java
 public List<String> getRuleNames(List<Rule> rules) {
@@ -187,11 +187,11 @@ stream = ruleList.stream();
 
 具体使用方式可见jdk文档的注释。熟能生巧。
 
-## 流的并行
+# 并行流
 
 在Java7之前，并行处理数据集合非常麻烦。第一，你得明确地把包含数据的数据结构分成若干子部分。第二，你要给每个子部分分配一个独立的线程。第三，你要在恰当的时候对它们进行同步来避免不希望出现的竞争条件，等待所有线程完成，最后把这些结果合并起来。Java7引入了Fork/Join框架，让这些操作更稳定且不易出错，但Fork/Join框架的使用仍然较为繁琐。现在，stream api也使用了Fork/Join框架，但封装了底层细节使你可以很轻易得实现数据集合的并行处理。当然要想正确使用，你仍需了解流内部是如何工作的。
 
-### 使用
+## 使用
 假设你需要计算一个巨型的int数组的和(假定不用考虑溢出的问题)，如下，
 ```java
 public static int sum(int[] arr) {
@@ -230,13 +230,13 @@ stream.parallel()
     ```
 > 并不会并行执行filter、reduce操作而顺序执行map操作。最后一次parallel调用会使得整个流为并行流，且流上定义的所有操作都会并行执行
 
-### 原理
+## 原理
 
-#### Fork/Join框架
+### Fork/Join框架
 
 Fork/Join框架的目的是以递归的方式将可以并行的任务拆分成更小的任务，然后将每个子任务的结果合并起来生成整体结果。它是ExecutorService接口的一个实现，把子任务分配给线程池（ForkJoinPool）中的工作线程。
 
-##### 定义任务
+#### 定义任务
 要把任务提交到ForkJoinPool，必须创建RecursiveTask<R>的一个子类，其中R是并行化任务（以及所有的子任务）产生的结果类型，或者如果任务不返回结果，则是RecursiveAction类型。要定义RecursiveTask，只需实现它唯一的抽象方法compute，
 ```java
 protected abstract R compute();
@@ -300,7 +300,7 @@ public class ForkJoinSumCalculator extends RecursiveTask<Integer> {
 }
 ```
 
-##### 执行任务
+#### 执行任务
 
 如此再计算数组求和就比较简单了，
 ```java
@@ -313,12 +313,12 @@ public static int forkJoinSum(int[] numbers) {
 本例中的计算过程如下，
 ![](/images/java-8-stream/fork-join-process.PNG)
 
-##### 工作窃取
+#### 工作窃取
 
 上例中在数组不多于10000个项目时就不再创建子任务了，这个选择是很随意的，但大多数情况下也很难找到一个好的启发式方法来确认它。如果有一个有1000万长度的数组，意味着ForkJoinSumCalculator会至少分出1000个子任务，对于多数计算机来说，似乎有点浪费资源，但分出大量的小任务一般来说都是一个好的选择。这是因为理想情况下，划分并行任务是应该让每个子任务都用完全相同的时间完成，让所有CPU内核都同样繁忙。但实际中，每个子任务所花的时间可能天差地别，要么因为划分策略效率低，或者其它不可预知的原因，如磁盘访问慢或者外部网络调用等。
 Fork/Join框架的实现用work stealing（工作窃取）的技术来解决这个问题。在实际应用中，这意味着这些任务差不多被平均分配到ForkJoinPool的所有线程上，每个线程都为分配给它的任务保存一个双向链式队列，每完成一个任务就会从队列头取下一个任务开始执行。基于前面所述的原因，某个线程可能早早完成了分配给它的所有任务，也就是它的队列已经空了，而其他线程还很忙。这时这个线程会随机从一个别的线程的队列尾部“偷走”一个任务。这个过程一直持续下去，直到所有的任务都执行完毕。
 
-##### 最佳实践
+#### 最佳实践
 虽然Fork/Join框架还算简单易用，但它也很容易被误用。以下是几个有效使用它的最佳实践，
 - 对一个任务调用Join方法会阻塞调用方，直到该任务作出结果。因此，有必要在两个子任务的计算都开始之后再调用join。
 - 不应该在RecursiveTask内部使用ForkJoinPool的invoke方法。
@@ -326,7 +326,7 @@ Fork/Join框架的实现用work stealing（工作窃取）的技术来解决这�
 - 多核处理器上使用Fork/Join框架并不一定比顺序计算快。要考虑问题的规模，分析一个任务是否可以分解成独立的子任务并进行合并，同时也要注意多线程编程的问题，如共享变量的访问等。
 - 由于工作窃取机制的使用，控制任务分解的条件以能够分解出大量的小任务通常来说都是一个好的选择。
 
-#### Spliterator
+### Spliterator
 
 回到前面所述的并行流计算数组和的例子，其执行过程大致如下图所示，
 ![](/images/java-8-stream/parallel-stream.PNG)
@@ -368,7 +368,7 @@ System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", "12")
 > 需注意，这是一个全局变量，因此它将影响代码中所有的并行流。目前还无法专为某个并行流指定这个值，且无法为某个并行流指定特定的线程池。这意味着如果你代码中的某处并行流执行了某些比较耗时的操作，会影响其它地方并行流的性能，且不易发现。
 > 一般而言，让ForkJoinPool等于处理器数量是个不错的默认值，除非有很好的理由，否则强烈建议不要修改。
 
-### 限制
+## 限制
 
 并不是所有的集合操作都适合并行流，且一般而言，想给出任何关于什么时候该用并行流的定量建议都是不可能也是毫无意义的。通常并行流的使用需要考虑以下几个方面，
 - 如果不确定，测量。并行流并不一定总是比顺序流快，如果不确定并行流的引入是否会带来性能上的提升，建议用适当的基准测试来检查其性能。
@@ -382,4 +382,327 @@ System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", "12")
 - 考虑终端操作中合并步骤的代价是大是小（如Collector中的combiner方法）。如果这一步代价很大，那么组合每个子流的部分结果所付出的代价就可能会超过通过并行流得到的性能提升
 - 还要注意，一个JVM进程中的所有并行流使用的是同一个共享的ForkJoinPool，如果一个并行流中的任务比较耗时则可能会间接地影响其它并行流的性能，而这往往很难察觉。
 
-# 源码分析
+# 实现
+
+关于stream api的源码分析推荐这篇博文 [一起爪哇Java 8（三）——好用的Stream](https://yq.aliyun.com/articles/69158?utm_source=tuicool&utm_medium=referral)
+
+这里我们尝试自己实现一个简易的流处理框架 -- MyStream
+
+首先，参考Java8 stream api的使用方式，MyStream的客户端使用如下，
+```java
+public class MyStreamApi {
+
+    public static void main(String[] args) {
+        String[] stringArr = {"a", "b", "123", "c", "d", "45"};
+        MyList<String> stringList = new MyList<>();
+        stringList.addAll(Arrays.asList(stringArr));
+
+        String result = stringList.myStream()
+                .filter(s -> s.length() == 1)
+                .map(String::toUpperCase)
+                .reduce((a, b) -> a + b);
+
+        System.out.println(result);
+    }
+
+}
+```
+我们定义了一个字符串数组并add到MyList中，MyList是我们自己定义的一个继承于ArrayList的列表，其myStream()函数用于构造一个流，且能够在流上定义filter、map中间操作，终止操作reduce会触发流的遍历执行。为了方便演示，我们假定字符串数组中的字符长度大于1的都是数字，而等于1的都是小写的单个字母，如此我们希望能filter出原始数组中的字母并将其map成大写字母，最后reduce拼接成一个字符串，即"ABCD"。
+
+先定义MyStream接口和用到的三个函数式接口，
+```java
+interface MyStream<T> {
+    MyStream<T> filter(Filter<T> filter);
+    MyStream<T> map(Mapper<T> mapper);
+    T reduce(Reducer<T> reducer);
+}
+
+@FunctionalInterface
+interface Filter<T> {
+    boolean test(T t);
+}
+
+@FunctionalInterface
+interface Mapper<T> {
+    T apply(T t);
+}
+
+@FunctionalInterface
+interface Reducer<T> {
+    T apply(T t1, T t2);
+}
+```
+这里为了不引入过多的泛型编程的复杂性，定义Mapper和Reducer的接收和处理返回为同一类型。
+
+MyList的定义如下，
+```java
+interface Streamable<T> {
+    MyStream<T> myStream();
+}
+
+class MyList<T> extends ArrayList<T> implements Streamable<T> {
+    @Override
+    public MyStream<T> myStream() {
+        // todo 定义并返回流
+    }
+}
+```
+由于在定义流的中间操作filter和map时，并不会触发流的遍历，而终止操作reduce会使得数据源中的每个元素迭代执行已定义好的filter和map操作，由此不难想到可以用链表实现流的构建和每个元素的执行过程。具体的，在myStream函数中定义链表的head节点，MyStream的filter和map函数定义该节点对于元素的过滤和映射逻辑，并连接到当前的链表，MyStream的reduce函数定义链表的tail节点，定义到这一步的元素的规约操作，并能够返回到链表的head节点，启动整个流中的元素依照所定义的迭代方式在这条构建好的流水线上遍历执行。
+
+定义节点，
+```java
+abstract class Sink<T> implements Consumer<T> {
+    Sink<T> source;         
+    Sink<T> downstream;
+    T result;
+}
+
+interface Consumer<T> {
+    void accept(T t);
+}
+```
+每个节点都持有head节点的引用source和指向下个节点的引用downstream，同时tail节点需要有一个域保存计算结果result。如此便可以构造整个流水线Pipeline，
+```java
+class Pipeline<T> implements MyStream<T> {
+
+    private Sink<T> upstreamSink;
+    private Iterator<T> iterator;   // 原始数据源的迭代器
+
+    // 定义链表的连接操作
+    Pipeline(Pipeline<T> upstream, Sink<T> upstreamSink) {
+        this.upstreamSink = upstreamSink;
+        if (upstream != null) {
+            upstream.upstreamSink.downstream = upstreamSink;
+            this.upstreamSink.source = upstream.upstreamSink.source;
+            this.iterator = upstream.iterator;
+        }
+    }
+
+    Pipeline(Pipeline<T> upstream, Sink<T> upstreamSink, Iterator<T> iterator) {
+        this(upstream, upstreamSink);
+        this.iterator = iterator;
+    }
+    @Override
+    public MyStream<T> filter(Filter<T> filter) {
+        return new Pipeline<>(this, new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                // 满足filter条件的元素才会进入下一个节点的处理
+                if (filter.test(t)) {       
+                    downstream.accept(t);
+                }
+            }
+        });
+    }
+
+    @Override
+    public MyStream<T> map(Mapper<T> mapper) {
+        return new Pipeline<>(this, new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                // 当前元素经过map处理后再交由下个节点处理
+                downstream.accept(mapper.apply(t));     
+            }
+        });
+    }
+
+    @Override
+    public T reduce(Reducer<T> reducer) {
+        Sink<T> terminalSink = new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                // 用当前的计算结果result与当前元素做规约操作，结果仍保存到节点的result
+                if (result == null) {
+                    result = t;
+                    return;
+                }
+                result = reducer.apply(result, t);
+            }
+        };
+        //
+        Sink<T> head = new Pipeline<>(this, terminalSink).upstreamSink.source;  
+
+        return evaluate(head);
+    }
+    private T evaluate(Sink<T> head) {
+        // 遍历原始数据源的每个元素
+        while (iterator.hasNext()) {
+            T t = iterator.next();
+            // 对于某一元素t依次执行已定义好的流水线的各个节点的操作，即filter -> map -> reduce
+            head.accept(t);
+        }
+        // 返回最终结果，即tail节点的result
+        return findTerminalSink(head).result;
+    }
+
+    private Sink<T> findTerminalSink(Sink<T> head) {
+        Sink<T> terminal = head;
+        while (terminal.downstream != null) {
+            terminal = terminal.downstream;
+        }
+        return terminal;
+    }
+}
+```
+关键的代码都已加了注释，现在只差最后一步，head节点的定义
+```java
+class MyList<T> extends ArrayList<T> implements Streamable<T> {
+    @Override
+    public MyStream<T> myStream() {
+        Sink<T> head = new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                // 只是简单地将元素交由下一节点处理
+                downstream.accept(t);
+            }
+        };
+        head.source = head;
+        return new Pipeline<>(null, head, iterator());
+    }
+}
+```
+这里使用了集合内部的迭代器，默认顺序遍历。当然如果想要实现流的并发，则需要自定义类似Spliterator接口的迭代器，并在evaluate函数中使用Fork/Join框架将负责原始数据不同部分的多个迭代器的处理交由ForkJoinPool中的线程并发执行。
+
+全部代码整理如下，
+```java
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Iterator;
+
+public class MyStreamApi {
+
+    public static void main(String[] args) {
+        String[] stringArr = {"a", "b", "123", "c", "d", "45"};
+        MyList<String> stringList = new MyList<>();
+        stringList.addAll(Arrays.asList(stringArr));
+
+        String result = stringList.myStream()
+                .filter(s -> s.length() == 1)
+                .map(String::toUpperCase)
+                .reduce((a, b) -> a + b);
+
+        System.out.println(result);
+    }
+
+}
+
+interface MyStream<T> {
+    MyStream<T> filter(Filter<T> filter);
+    MyStream<T> map(Mapper<T> mapper);
+    T reduce(Reducer<T> reducer);
+}
+class Pipeline<T> implements MyStream<T> {
+
+    private Sink<T> upstreamSink;
+    private Iterator<T> iterator;
+
+    Pipeline(Pipeline<T> upstream, Sink<T> upstreamSink) {
+        this.upstreamSink = upstreamSink;
+        if (upstream != null) {
+            upstream.upstreamSink.downstream = upstreamSink;
+            this.upstreamSink.source = upstream.upstreamSink.source;
+            this.iterator = upstream.iterator;
+        }
+    }
+
+    Pipeline(Pipeline<T> upstream, Sink<T> upstreamSink, Iterator<T> iterator) {
+        this(upstream, upstreamSink);
+        this.iterator = iterator;
+    }
+    @Override
+    public MyStream<T> filter(Filter<T> filter) {
+        return new Pipeline<>(this, new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                if (filter.test(t)) {
+                    downstream.accept(t);
+                }
+            }
+        });
+    }
+
+    @Override
+    public MyStream<T> map(Mapper<T> mapper) {
+        return new Pipeline<>(this, new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                downstream.accept(mapper.apply(t));
+            }
+        });
+    }
+
+    @Override
+    public T reduce(Reducer<T> reducer) {
+        Sink<T> terminalSink = new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                if (result == null) {
+                    result = t;
+                    return;
+                }
+                result = reducer.apply(result, t);
+            }
+        };
+        Sink<T> head = new Pipeline<>(this, terminalSink).upstreamSink.source;
+
+        return evaluate(head);
+    }
+    private T evaluate(Sink<T> head) {
+        while (iterator.hasNext()) {
+            T t = iterator.next();
+            head.accept(t);
+        }
+        return findTerminalSink(head).result;
+    }
+
+    private Sink<T> findTerminalSink(Sink<T> head) {
+        Sink<T> terminal = head;
+        while (terminal.downstream != null) {
+            terminal = terminal.downstream;
+        }
+        return terminal;
+    }
+}
+
+abstract class Sink<T> implements Consumer<T> {
+    Sink<T> source;
+    Sink<T> downstream;
+    T result;
+}
+interface Consumer<T> {
+    void accept(T t);
+}
+
+@FunctionalInterface
+interface Filter<T> {
+    boolean test(T t);
+}
+@FunctionalInterface
+interface Mapper<T> {
+    T apply(T t);
+}
+@FunctionalInterface
+interface Reducer<T> {
+    T apply(T t1, T t2);
+}
+
+interface Streamable<T> {
+    MyStream<T> myStream();
+}
+
+class MyList<T> extends ArrayList<T> implements Streamable<T> {
+    @Override
+    public MyStream<T> myStream() {
+        Sink<T> head = new Sink<T>() {
+            @Override
+            public void accept(T t) {
+                downstream.accept(t);
+            }
+        };
+        head.source = head;
+        return new Pipeline<>(null, head, iterator());
+    }
+}
+```
+
+Java8的stream框架的处理思路与此大致相同。当然由于支持了前面所讲的各种特性，整体的复杂性就是另一个量级了。
